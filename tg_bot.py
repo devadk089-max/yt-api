@@ -553,7 +553,7 @@ async def _daily_report_loop():
             )
             if not valid:
                 text += "\n⚠️ `/refresh` karo ya naya account add karo."
-            elif cs.get("expires_in_sec", 99999) < 86400:
+            elif (cs.get("expires_in_sec") or 99999) < 86400:
                 text += "\n⚠️ Cookies kal expire hongi — auto-refresh hoga."
 
             await send_alert(text, level="warning" if not valid else "info")
