@@ -313,7 +313,7 @@ def _register(bot: Client):
             exp     = cs["expires_in_human"]
             if not cs["valid"]:
                 exp = "🚨 EXPIRED"
-            elif cs.get("expires_in_sec", 99999) < 86400:
+            elif (cs.get("expires_in_sec") or 99999) < 86400:
                 exp = f"⚠️ {exp} (soon!)"
 
             gh_info = gh.get("repo", gh.get("reason", "unknown"))
