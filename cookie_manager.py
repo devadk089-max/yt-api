@@ -280,11 +280,25 @@ async def try_refresh_cookies() -> bool:
                 logger.error(f"GitHub push error: {e}")
             return True
         else:
-            # Exact error DM karo
+            # Error type detect karo
             clean_err = (err_msg or "Unknown")[:300]
+            err_lower = clean_err.lower()
+
+            if any(x in err_lower for x in ["password", "sign in", "credentials", "wrong", "incorrect", "login"]):
+                err_type = "🔑 Password galat lag raha hai"
+            elif any(x in err_lower for x in ["2fa", "two", "verification", "verify", "otp"]):
+                err_type = "📱 2FA ON hai — OFF karo"
+            elif any(x in err_lower for x in ["block", "suspicious", "captcha", "unusual"]):
+                err_type = "🚫 Google ne block kiya — kuch der baad try karo"
+            elif any(x in err_lower for x in ["network", "timeout", "connection"]):
+                err_type = "🌐 Network error — retry hoga"
+            else:
+                err_type = "❓ Unknown error"
+
             await _alert(
-                f"⚠️ Refresh failed: `{masked}`\n\n"
-                f"**Error:**\n`{clean_err}`\n\n"
+                f"⚠️ Refresh failed: `{masked}`\n"
+                f"**Reason:** {err_type}\n\n"
+                f"**Error detail:**\n`{clean_err}`\n\n"
                 f"Next account try ho raha hai...",
                 level="warning",
             )
