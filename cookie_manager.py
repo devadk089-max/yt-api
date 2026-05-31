@@ -168,20 +168,25 @@ def cookies_status() -> dict:
 # REFRESH — yt-dlp se login + cookies bano
 # ─────────────────────────────────────────
 
-async def _refresh_one_account(email: str, password: str) -> bool:
-    """Ek account se yt-dlp login karke cookies banao."""
+async def _refresh_one_account(email: str, password: str) -> tuple:
+    """
+    Ek account se cookies banao.
+    Returns: (True, None) ya (False, "error message")
+    """
     import yt_dlp
 
     tmp = COOKIES_FILE + ".tmp"
+    _err = []
 
     def _do():
         opts = {
-            "quiet": True,
-            "no_warnings": True,
+            "quiet": False,
+            "no_warnings": False,
             "skip_download": True,
             "cookiefile": tmp,
             "username": email,
             "password": password,
+            "logger": _YtLogger(_err),
         }
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -190,25 +195,43 @@ async def _refresh_one_account(email: str, password: str) -> bool:
                     download=False,
                 )
             return True
+        except yt_dlp.utils.DownloadError as e:
+            _err.append(str(e))
+            return False
         except Exception as e:
-            logger.error(f"yt-dlp login failed [{email[:5]}***]: {e}")
+            _err.append(str(e))
             return False
 
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(None, _do)
 
+    err_msg = _err[-1] if _err else "Unknown error"
+
     if ok and Path(tmp).exists() and Path(tmp).stat().st_size > 100:
         backup_cookies()
         shutil.move(tmp, COOKIES_FILE)
         logger.info(f"✅ Cookies refreshed [{email[:5]}***]")
-        return True
+        return True, None
 
     if Path(tmp).exists():
         try:
             os.remove(tmp)
         except Exception:
             pass
-    return False
+
+    logger.error(f"Refresh failed [{email[:5]}***]: {err_msg}")
+    return False, err_msg
+
+
+class _YtLogger:
+    """yt-dlp logger — errors capture karo."""
+    def __init__(self, errors: list):
+        self._e = errors
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg):
+        self._e.append(msg)
 
 
 async def try_refresh_cookies() -> bool:
@@ -235,10 +258,10 @@ async def try_refresh_cookies() -> bool:
             continue
 
         logger.info(f"Trying [{email[:5]}***]...")
-        ok = await _refresh_one_account(email, password)
+        ok, err_msg = await _refresh_one_account(email, password)
+        masked = f"{email[:3]}***@{email.split('@')[-1]}"
 
         if ok:
-            masked = f"{email[:3]}***@{email.split('@')[-1]}"
             await _alert(
                 f"✅ Cookies refreshed!\n📧 Account: `{masked}`",
                 level="success",
@@ -257,9 +280,12 @@ async def try_refresh_cookies() -> bool:
                 logger.error(f"GitHub push error: {e}")
             return True
         else:
-            masked = f"{email[:3]}***@{email.split('@')[-1]}"
+            # Exact error DM karo
+            clean_err = (err_msg or "Unknown")[:300]
             await _alert(
-                f"⚠️ Refresh failed: `{masked}`\nNext account try ho raha hai...",
+                f"⚠️ Refresh failed: `{masked}`\n\n"
+                f"**Error:**\n`{clean_err}`\n\n"
+                f"Next account try ho raha hai...",
                 level="warning",
             )
 
