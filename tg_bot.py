@@ -345,7 +345,30 @@ def _register(bot: Client):
             "🔄 Refreshing cookies...\nSabhi accounts try honge."
         )
         try:
+            # Errors capture karne ke liye patch
+            _errors = []
+            _orig_alert = None
+            try:
+                import tg_bot as _self
+                _orig_alert = _self.send_alert
+                async def _capture_alert(text, level="info"):
+                    if level in ("warning", "error"):
+                        _errors.append(text)
+                    await _orig_alert(text, level)
+                _self.send_alert = _capture_alert
+            except Exception:
+                pass
+
             ok = await try_refresh_cookies()
+
+            # Restore
+            try:
+                if _orig_alert:
+                    import tg_bot as _self
+                    _self.send_alert = _orig_alert
+            except Exception:
+                pass
+
             cs = cookies_status()
             if ok:
                 await loading.edit_text(
@@ -354,13 +377,22 @@ def _register(bot: Client):
                     f"🐙 GitHub mein bhi push ho gaya."
                 )
             else:
+                # Errors jo capture hue unhe dikhao
+                err_detail = ""
+                if _errors:
+                    last = _errors[-1][:500]
+                    err_detail = f"\n\n**Last Error:**\n`{last}`"
+
+                accounts = _load_accounts()
+                acc_count = len(accounts)
+
                 await loading.edit_text(
-                    "❌ **Refresh failed!**\n\n"
-                    "Possible reasons:\n"
-                    "• Account ka password galat\n"
-                    "• 2FA ON hai (OFF karo)\n"
-                    "• Google ne block kiya\n\n"
-                    "`/addaccount` se naya account add karo."
+                    f"❌ **Refresh failed!** ({acc_count} accounts tried){err_detail}\n\n"
+                    f"**Common fixes:**\n"
+                    f"• Railway Variables mein `YT_ACCOUNTS` check karo\n"
+                    f"• Google account ka 2FA OFF karo\n"
+                    f"• Password mein special chars hain to quotes mein wrap karo\n"
+                    f"• Naya account try karo: `/addaccount`"
                 )
         except Exception as e:
             await loading.edit_text(f"❌ Error: `{e}`")
