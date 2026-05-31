@@ -29,8 +29,10 @@ logger = logging.getLogger("github_sync")
 GITHUB_TOKEN        = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO         = os.getenv("GITHUB_REPO", "")          # "username/repo"
 GITHUB_BRANCH       = os.getenv("GITHUB_BRANCH", "main")
-COOKIES_PATH_IN_REPO = os.getenv("COOKIES_PATH_IN_REPO", "cookies/cookies.txt")
-COOKIES_LOCAL       = os.getenv("COOKIES_FILE", "cookies.txt")
+COOKIES_PATH_IN_REPO  = os.getenv("COOKIES_PATH_IN_REPO", "cookies/cookies.txt")
+ACCOUNTS_PATH_IN_REPO = os.getenv("ACCOUNTS_PATH_IN_REPO", "data/accounts.json")
+COOKIES_LOCAL         = os.getenv("COOKIES_FILE", "cookies.txt")
+ACCOUNTS_LOCAL        = os.getenv("ACCOUNTS_FILE", "accounts.json")
 
 GITHUB_API = "https://api.github.com"
 
@@ -166,6 +168,98 @@ async def push_cookies_to_github(commit_msg: str = "chore: refresh cookies") -> 
 # ─────────────────────────────────────────
 # VERIFY REPO ACCESS
 # ─────────────────────────────────────────
+
+# ─────────────────────────────────────────
+# ACCOUNTS — GitHub se save/load
+# ─────────────────────────────────────────
+
+async def push_accounts_to_github(accounts: list) -> bool:
+    """
+    accounts.json → GitHub repo mein push karo.
+    Har baar add/remove hone pe call hota hai.
+    """
+    if not _configured():
+        return False
+
+    content_bytes = json.dumps(accounts, indent=2, ensure_ascii=False).encode()
+    content_b64   = base64.b64encode(content_bytes).decode()
+    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{ACCOUNTS_PATH_IN_REPO}"
+
+    # Existing SHA nikalo
+    sha = None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=_headers(),
+                params={"ref": GITHUB_BRANCH},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    sha = (await resp.json()).get("sha")
+    except Exception:
+        pass
+
+    payload = {
+        "message": "chore: update accounts",
+        "content": content_b64,
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.put(
+                url, headers=_headers(),
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status in (200, 201):
+                    logger.info("✅ Accounts pushed to GitHub")
+                    return True
+                else:
+                    body = await resp.text()
+                    logger.error(f"Accounts push failed: {resp.status} — {body[:200]}")
+                    return False
+    except Exception as e:
+        logger.error(f"Accounts push error: {e}")
+        return False
+
+
+async def pull_accounts_from_github() -> list:
+    """
+    GitHub repo se accounts.json load karo.
+    Startup pe call hota hai.
+    Returns: list of accounts ya [] agar nahi mila
+    """
+    if not _configured():
+        return []
+
+    url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{ACCOUNTS_PATH_IN_REPO}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=_headers(),
+                params={"ref": GITHUB_BRANCH},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 404:
+                    logger.info("accounts.json GitHub mein nahi hai — fresh start")
+                    return []
+                if resp.status != 200:
+                    logger.error(f"Accounts pull failed: {resp.status}")
+                    return []
+                data    = await resp.json()
+                raw     = base64.b64decode(data.get("content", "")).decode("utf-8", errors="ignore")
+                accounts = json.loads(raw)
+                logger.info(f"✅ {len(accounts)} accounts pulled from GitHub")
+                # Local file mein bhi save karo
+                Path(ACCOUNTS_LOCAL).write_text(json.dumps(accounts, indent=2))
+                return accounts
+    except Exception as e:
+        logger.error(f"Accounts pull error: {e}")
+        return []
+
 
 async def verify_github_access() -> dict:
     """
