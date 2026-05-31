@@ -69,8 +69,20 @@ def _load_accounts() -> list:
 
 def _save_accounts(accounts: list):
     Path(ACCOUNTS_FILE).write_text(json.dumps(accounts, indent=2))
-    # cookie_manager bhi sync karo
     os.environ["YT_ACCOUNTS"] = json.dumps(accounts)
+    # GitHub pe bhi push karo — background mein
+    async def _push():
+        try:
+            from github_sync import push_accounts_to_github
+            await push_accounts_to_github(accounts)
+        except Exception as e:
+            logger.error(f"GitHub accounts push error: {e}")
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(_push())
+    except Exception:
+        pass
 
 
 def _mask(email: str) -> str:
@@ -616,11 +628,25 @@ async def start_bot():
     )
     _register(_bot)
 
-    # Startup pe saved accounts env mein sync karo
-    accounts = _load_accounts()
-    if accounts:
-        os.environ["YT_ACCOUNTS"] = json.dumps(accounts)
-        logger.info(f"Loaded {len(accounts)} accounts from {ACCOUNTS_FILE}")
+    # Startup pe GitHub se accounts pull karo
+    try:
+        from github_sync import pull_accounts_from_github
+        gh_accounts = await pull_accounts_from_github()
+        if gh_accounts:
+            Path(ACCOUNTS_FILE).write_text(json.dumps(gh_accounts, indent=2))
+            os.environ["YT_ACCOUNTS"] = json.dumps(gh_accounts)
+            logger.info(f"✅ {len(gh_accounts)} accounts loaded from GitHub")
+        else:
+            # GitHub pe nahi mila — local se try karo
+            accounts = _load_accounts()
+            if accounts:
+                os.environ["YT_ACCOUNTS"] = json.dumps(accounts)
+                logger.info(f"Loaded {len(accounts)} accounts from local file")
+    except Exception as e:
+        logger.error(f"GitHub accounts pull error: {e}")
+        accounts = _load_accounts()
+        if accounts:
+            os.environ["YT_ACCOUNTS"] = json.dumps(accounts)
 
     await _bot.start()
     logger.info("✅ Telegram bot started")
